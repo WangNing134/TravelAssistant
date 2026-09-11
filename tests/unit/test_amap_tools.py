@@ -4,11 +4,25 @@ import httpx
 import pytest
 import respx
 
+from travel_assistant.domain.models import POI
 from travel_assistant.tools.amap_client import get_amap_client
 from travel_assistant.tools.around_tool import search_hotels
 from travel_assistant.tools.geocode_tool import geocode_city
-from travel_assistant.tools.poi_tool import search_attractions
+from travel_assistant.tools.poi_tool import _interleave, search_attractions
 from travel_assistant.tools.weather_tool import get_daily_weather
+
+
+def test_interleave_preferred_does_not_monopolize():
+    def p(name):
+        return POI(name=name, lng=1.0, lat=1.0)
+
+    preferred = [p(f"偏好{i}") for i in range(12)]
+    popular = [p(f"热门{i}") for i in range(12)]
+    merged = _interleave(preferred, popular, target=12)
+    assert len(merged) == 12
+    # 前两名必须交替，偏好优先；热门至少占 1/3 名额
+    assert [x.name for x in merged[:2]] == ["偏好0", "热门0"]
+    assert sum(1 for x in merged if x.name.startswith("热门")) >= 4
 
 BASE = "https://restapi.amap.com/v3"
 

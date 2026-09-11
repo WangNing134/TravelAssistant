@@ -78,4 +78,6 @@ def parse_arrangement(data: dict | None, days: int, allowed_names: set[str]) -> 
             used.append(name)
     if len(used) != len(set(used)):
         return None  # 重复使用
+    if set(used) != allowed_names:
+        return None  # 遗漏真实景点
     return draft

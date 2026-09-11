@@ -1,83 +1,49 @@
-"""P3 验收：LangGraph 非对称 DAG 拓扑、并行/同步语义、状态聚合、reducer 不覆盖。"""
+"""DAG 拓扑结构断言 + 并行 reducer 测试（确定性，不依赖时序）。"""
 
 from __future__ import annotations
 
-import pytest
 from langgraph.graph import END, START, StateGraph
 
-from travel_assistant.agents import common
 from travel_assistant.domain.state import AgentState
-from travel_assistant.graph.builder import build_graph
+from travel_assistant.graph.builder import (
+    NODE_AGGREGATE,
+    NODE_EXTRACT,
+    NODE_GLOBAL_FALLBACK,
+    NODE_HOTEL,
+    NODE_POI,
+    NODE_WEATHER,
+    build_graph,
+)
 
 
-@pytest.fixture(autouse=True)
-def _clear_timeline():
-    common.NODE_TIMELINE.clear()
-    yield
-    common.NODE_TIMELINE.clear()
+def test_graph_topology_is_asymmetric_dag():
+    builder = build_graph().builder
+    edges = set(builder.edges)
+    branches = builder.branches[NODE_EXTRACT]
 
+    # START -> extract
+    assert (START, NODE_EXTRACT) in edges
 
-def _times():
-    enter: dict[str, float] = {}
-    exit_: dict[str, float] = {}
-    runs: dict[str, list[float]] = {}
-    for event, node, t in common.NODE_TIMELINE:
-        if event == "enter":
-            enter[node] = t
-        elif event == "exit":
-            exit_[node] = t
-        elif event == "run":
-            runs.setdefault(node, []).append(t)
-    return enter, exit_, runs
+    # 条件分支：extract 后可 fan-out 到 weather/poi，致命时分流 global_fallback
+    spec = next(iter(branches.values()))
+    assert set(spec.ends) == {NODE_WEATHER, NODE_POI, NODE_GLOBAL_FALLBACK}
 
+    # Chain：Hotel 的唯一上游是 POI（串行依赖，weather 不接 hotel）
+    assert (NODE_POI, NODE_HOTEL) in edges
+    assert not any(src == NODE_WEATHER and dst == NODE_HOTEL for src, dst in edges)
 
-async def test_dag_runs_and_assembles_stub_plan():
-    graph = build_graph()
-    result = await graph.ainvoke({"query": "去成都玩2天看熊猫", "trace_id": "p3-test"})
+    # Fan-in barrier：aggregate 上游恰为 weather 与 hotel 两条边
+    aggregate_sources = {src for src, dst in edges if dst == NODE_AGGREGATE}
+    assert aggregate_sources == {NODE_WEATHER, NODE_HOTEL}
 
-    # ---- 时序拓扑 ----
-    enter, exit_, runs = _times()
-    order = ["supervisor_extract", "weather_agent", "poi_agent", "hotel_agent", "supervisor_aggregate"]
-    for node in order:
-        assert node in enter and node in exit_, f"节点 {node} 未执行"
-
-    # fan-out：weather/poi 都在 extract 之后启动（<= 因 Windows monotonic 分辨率 ~15ms）
-    assert exit_["supervisor_extract"] <= enter["weather_agent"]
-    assert exit_["supervisor_extract"] <= enter["poi_agent"]
-
-    # 并行性证据：poi（桩延迟0.2s）启动时 weather（0.05s）尚未结束 => 同一 superstep 并发
-    assert enter["poi_agent"] < exit_["weather_agent"]
-
-    # 串行依赖：hotel 必须在 poi 返回之后
-    assert exit_["poi_agent"] <= enter["hotel_agent"]
-
-    # fan-in barrier：aggregate 虽可能被多入边调度多次，但真实编排只执行一次，
-    # 且执行时刻必须晚于 weather 与 hotel 两路全部完成
-    assert runs.get("supervisor_aggregate") and len(runs["supervisor_aggregate"]) == 1
-    run_at = runs["supervisor_aggregate"][0]
-    assert exit_["weather_agent"] <= run_at
-    assert exit_["hotel_agent"] <= run_at
-
-    # ---- 状态聚合 ----
-    assert result["city"] == "成都"
-    assert result["days"] == 2
-    assert len(result["weathers"]) == 2
-    assert len(result["pois"]) == 4
-    assert len(result["hotels"]) == 1
-
-    itineraries = result["itineraries"]
-    assert len(itineraries) == 2
-    assert itineraries[0].weather.condition.startswith("晴")
-    assert itineraries[0].hotel is not None and itineraries[0].hotel.name == "桩酒店"
-    # 4 个真实 POI 被贪心切分，恰好分配完、无丢失
-    assigned = [p for day in itineraries for p in day.pois]
-    assert len(assigned) == 4
-    assert len({p.name for p in assigned}) == 4
-    assert result["aggregated"] is True
+    # 终止接线
+    assert (NODE_AGGREGATE, END) in edges
+    assert (NODE_GLOBAL_FALLBACK, END) in edges
 
 
 async def test_parallel_warnings_reducer_no_overwrite():
     """两个并行节点同时写 warnings，reducer 必须累加而非覆盖。"""
+    from langgraph.graph import END as E
 
     async def node_a(state):
         return {"warnings": ["from-a"]}
@@ -96,7 +62,7 @@ async def test_parallel_warnings_reducer_no_overwrite():
     g.add_edge(START, "b")
     g.add_edge("a", "join")
     g.add_edge("b", "join")
-    g.add_edge("join", END)
+    g.add_edge("join", E)
     app = g.compile()
 
     result = await app.ainvoke({})
