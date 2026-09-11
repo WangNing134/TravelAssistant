@@ -52,6 +52,9 @@ def patch_graph(monkeypatch, amap_fixture):
     monkeypatch.setattr(supervisor, "arrange_pois_by_llm", working_arrange)
 
     with respx.mock(assert_all_called=False) as router:
+        router.get(f"{BASE_AMAP}/geocode/geo").mock(
+            return_value=httpx.Response(200, json={"status": "1", "geocodes": []})
+        )
         router.get(f"{BASE_AMAP}/weather/weatherInfo").mock(
             return_value=httpx.Response(200, json=amap_fixture("weather_chengdu.json"))
         )

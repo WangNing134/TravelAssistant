@@ -119,7 +119,7 @@ async def test_l3_empty_pois_uses_classic(patch_extract, amap_fixture):
 async def test_l3_unknown_city_generic_template(patch_extract, monkeypatch, amap_ok):
     from travel_assistant.agents import poi_agent
 
-    async def empty_pois(adcode, preferences, days, center=None, limit=None):
+    async def empty_pois(adcode, preferences, days, center=None, limit=None, city=None):
         return []
 
     monkeypatch.setattr(poi_agent, "search_attractions", empty_pois)
@@ -167,6 +167,9 @@ async def test_l1_weather_failure_partial_degraded(patch_extract, monkeypatch, a
     monkeypatch.setattr(supervisor, "arrange_pois_by_llm", working_arrange)
 
     with respx.mock(assert_all_called=False) as router:
+        router.get(f"{BASE}/geocode/geo").mock(
+            return_value=httpx.Response(200, json={"status": "1", "geocodes": []})
+        )
         router.get(f"{BASE}/weather/weatherInfo").mock(
             return_value=httpx.Response(
                 200, json={"status": "0", "infocode": "10021", "info": "CUQPS_HAS_EXCEEDED"}

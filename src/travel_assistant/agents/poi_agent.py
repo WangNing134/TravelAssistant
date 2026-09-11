@@ -12,5 +12,7 @@ async def poi_agent(state: dict) -> dict:
     adcode = state.get("adcode", "")
     days = state.get("days", 1)
     preferences = state.get("preferences", [])
-    pois = await search_attractions(adcode, preferences, days, center=state.get("center"))
+    pois = await search_attractions(
+        adcode, preferences, days, center=state.get("center"), city=state.get("city")
+    )
     return {"pois": pois}

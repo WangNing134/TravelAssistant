@@ -1,0 +1,9 @@
+services:
+  travel-assistant:
+    build: .
+    image: travel-assistant:0.1.0
+    ports:
+      - "8000:8000"
+    env_file:
+      - .env
+    restart: unless-stopped

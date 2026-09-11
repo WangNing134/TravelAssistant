@@ -25,6 +25,19 @@ def known_cities() -> list[str]:
     return sorted(_load_data().get("cities", {}).keys())
 
 
+def classic_seed_names(city: str) -> list[str]:
+    """库内该城市全部已核验景点名（用作高德检索种子词，命中后返回的仍是高德真实 POI）。"""
+    entry = _load_data().get("cities", {}).get(city)
+    if entry is None:
+        return []
+    names: list[str] = []
+    for day in entry.get("days", []):
+        for p in day:
+            if p["name"] not in names:
+                names.append(p["name"])
+    return names
+
+
 def _lib_to_itineraries(days_raw: list[list[dict]], days: int) -> list[Itinerary]:
     dates = itinerary_dates(days)
     result: list[Itinerary] = []

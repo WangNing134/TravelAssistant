@@ -22,10 +22,14 @@ CHENGDU = Location(name="成都", adcode="510100", lng=104.066301, lat=30.572961
 
 @pytest.fixture
 def amap_mocked(amap_fixture):
+    def geocode_side_effect(request):
+        # 仅城市中心请求返回；“成都+景点名”的种子二次请求必须返回空，杜绝串味
+        if request.url.params.get("address") == "成都":
+            return httpx.Response(200, json=amap_fixture("geocode_chengdu.json"))
+        return httpx.Response(200, json={"status": "1", "geocodes": []})
+
     with respx.mock(assert_all_called=False) as router:
-        router.get(f"{BASE}/geocode/geo").mock(
-            return_value=httpx.Response(200, json=amap_fixture("geocode_chengdu.json"))
-        )
+        router.get(f"{BASE}/geocode/geo").mock(side_effect=geocode_side_effect)
         router.get(f"{BASE}/weather/weatherInfo").mock(
             return_value=httpx.Response(200, json=amap_fixture("weather_chengdu.json"))
         )

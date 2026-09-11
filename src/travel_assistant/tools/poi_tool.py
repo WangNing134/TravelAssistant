@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+
 from travel_assistant.domain.models import Location, POI
 from travel_assistant.fallback.greedy_planner import haversine_km
 from travel_assistant.observability.logging import get_logger
@@ -17,6 +19,18 @@ POPULAR_KEYWORDS = "风景名胜区|古镇|古街|博物馆|纪念馆|寺"
 
 # 距城市中心超过该半径（公里）的远郊县点位丢弃
 CITY_GEOFENCE_KM = 22.0
+
+# 同一景区内部子点位配额：如“小熊猫产房/熊猫别墅/大熊猫1号别墅”挤掉城市名片
+# 大型园区（熊猫基地/古镇）内部场馆跨度可达 0.8km，半径取 0.8 覆盖
+SAME_SITE_RADIUS_KM = 0.8
+SAME_SITE_QUOTA = 2
+
+# 高德 110000 类型下混入的商业体脏数据，名称命中即丢弃
+JUNK_NAME_TERMS = ("电器", "安防", "商厦", "建材", "家具", "批发", "五金", "汽配", "购物广场")
+
+
+def _is_junk_name(name: str) -> bool:
+    return any(term in name for term in JUNK_NAME_TERMS)
 
 
 def _parse_poi(item: dict) -> POI | None:
@@ -63,7 +77,68 @@ def _interleave(preferred: list[POI], popular: list[POI], target: int) -> list[P
             merged.append(popular[i])
         if len(merged) >= target * 2:
             break
-    return _dedupe(merged)[:target]
+    return _cap_same_site(_dedupe(merged))[:target]
+
+
+def _is_same_site(a: POI, b: POI) -> bool:
+    """判定为同一景区：物理上紧邻，或名称存在包含关系（如景区与其子场馆）。"""
+    if haversine_km(a, b) <= SAME_SITE_RADIUS_KM:
+        return True
+    na, nb = a.name, b.name
+    return len(na) >= 4 and len(nb) >= 4 and (na in nb or nb in na)
+
+
+def _cap_same_site(pois: list[POI]) -> list[POI]:
+    """同一景区最多保留 SAME_SITE_QUOTA 个点，被挤掉的名额由后续不同景区回填。"""
+    clusters: list[list[POI]] = []
+    kept: list[POI] = []
+    dropped: list[str] = []
+    for p in pois:
+        for cluster in clusters:
+            if any(_is_same_site(p, q) for q in cluster):
+                if len(cluster) < SAME_SITE_QUOTA:
+                    cluster.append(p)
+                    kept.append(p)
+                else:
+                    dropped.append(p.name)
+                break
+        else:
+            clusters.append([p])
+            kept.append(p)
+    if dropped:
+        logger.info("poi_same_site_capped", dropped=dropped, quota=SAME_SITE_QUOTA)
+    return kept
+
+
+async def _seed_search(
+    names: list[str], adcode: str, center: Location | None, city: str
+) -> list[POI]:
+    """城市名片逐个 geocode 定位（place/text 权重排序会淹没精确匹配）。
+
+    geocode 强制城市限定 + 归属/距离核验，坐标全部来自高德；串行节流规避 QPS 限制。
+    """
+    from travel_assistant.tools.geocode_tool import geocode_place_in_city
+
+    result: list[POI] = []
+    for i, name in enumerate(names):
+        if i:
+            await asyncio.sleep(0.25)  # 个人 Key QPS 节流
+        loc = await geocode_place_in_city(name, adcode, center=center, city=city)
+        if loc is not None:
+            result.append(
+                POI(
+                    name=name,
+                    adcode=adcode,
+                    lng=loc.lng,
+                    lat=loc.lat,
+                    poi_id="",
+                    address="",
+                    type_code="",
+                    duration=2.0,
+                    price=None,
+                )
+            )
+    return result
 
 
 async def _text_search(adcode: str, keywords: str, limit: int) -> list[POI]:
@@ -78,7 +153,11 @@ async def _text_search(adcode: str, keywords: str, limit: int) -> list[POI]:
     if keywords:
         params["keywords"] = keywords
     data = await get_amap_client().get_json("/place/text", params)
-    parsed = [p for item in (data.get("pois") or []) if (p := _parse_poi(item))]
+    parsed = [
+        p
+        for item in (data.get("pois") or [])
+        if (p := _parse_poi(item)) and not _is_junk_name(p.name)
+    ]
     return parsed
 
 
@@ -88,8 +167,17 @@ async def search_attractions(
     days: int,
     center: Location | None = None,
     limit: int | None = None,
+    city: str | None = None,
 ) -> list[POI]:
-    """偏好检索优先，同时合并城市热门景点保证覆盖；去重后截取。任何失败返回 []。"""
+    """偏好检索优先，同时合并城市热门景点保证覆盖；去重后截取。任何失败返回 []。
+
+    热门候选三路融合（解决高德空关键字按 adcode 全市排序、市区名片被远郊县淹没）：
+    1. 已核验经典景点名种子词（本城城市名片，最可靠）；
+    2. 精准类型热词（古镇/博物馆/寺等）；
+    3. 空关键字泛检索（兜底补充）。
+    """
+    from travel_assistant.fallback.classic import classic_seed_names
+
     target = limit or min(max(days * 4, 8), 16)
 
     keyword_str = "|".join(k.strip() for k in preferences if k.strip())
@@ -98,10 +186,16 @@ async def search_attractions(
     if keyword_str:
         preferred = await _text_search(adcode, keyword_str, target)
 
-    # 热门景点双路：精准热度词 + 泛热门（城市名片常不含精准词，如“宽窄巷子”）
+    # 路 1：已核验城市名片种子（种子仅为检索词，坐标全部来自高德 geocode）
+    seed_names = classic_seed_names(city) if city else []
+    seeded = (
+        await _seed_search(seed_names, adcode, center, city) if seed_names and center else []
+    )
+
+    # 路 2/3：精准热度词 + 泛热门（城市名片常不含精准词，如“宽窄巷子”）
     keyworded = await _text_search(adcode, POPULAR_KEYWORDS, target)
     generic = await _text_search(adcode, "", target)
-    popular = _dedupe(keyworded + generic)
+    popular = _dedupe(seeded + keyworded + generic)
 
     if center is not None:
         before = len(preferred) + len(popular)
@@ -109,7 +203,11 @@ async def search_attractions(
         popular = [p for p in popular if haversine_km(center, p) <= CITY_GEOFENCE_KM]
         logger.info("poi_geofence", radius_km=CITY_GEOFENCE_KM, dropped=before - len(preferred) - len(popular))
 
-    pois = _interleave(preferred, popular, target) if preferred else _dedupe(popular)[:target]
+    pois = (
+        _interleave(preferred, popular, target)
+        if preferred
+        else _cap_same_site(_dedupe(popular))[:target]
+    )
     logger.info(
         "poi_search_done",
         adcode=adcode,

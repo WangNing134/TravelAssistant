@@ -30,7 +30,7 @@ dev = [
 where = ["src"]
 
 [tool.setuptools.package-data]
-travel_assistant = ["fallback/classic_routes/*.json"]
+travel_assistant = ["fallback/*.json"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
