@@ -48,12 +48,17 @@ def trace_node(name: str):
 
 
 def circuit_breaker(
-    name: str, empty_outputs: dict, *, aggregate: bool = False
+    name: str,
+    empty_outputs: dict,
+    *,
+    aggregate: bool = False,
+    timeout_attr: str | None = None,
 ) -> Callable[[Callable[[dict], Awaitable[dict]]], Callable[[dict], Awaitable[dict]]]:
     """L3 节点级超时熔断装饰器。
 
     - 业务超时：返回节点空产出 + circuit=True，保证下游 barrier 不因缺键死等；
-    - aggregate=True 时超时直接在护栏内构造经典路线（不再依赖后续节点）。
+    - aggregate=True 时超时直接在护栏内构造经典路线（不再依赖后续节点）；
+    - timeout_attr：指定该节点在 Settings 中的独立超时字段名（如 poi_node_timeout）。
     """
 
     def decorator(fn):
@@ -64,11 +69,13 @@ def circuit_breaker(
                 logger.warning("node_skipped_circuit", node=name)
                 return {**empty_outputs, "circuit": True}
 
-            timeout = (
-                get_settings().aggregate_node_timeout
-                if aggregate
-                else get_settings().node_timeout
-            )
+            settings = get_settings()
+            if aggregate:
+                timeout = settings.aggregate_node_timeout
+            elif timeout_attr:
+                timeout = getattr(settings, timeout_attr)
+            else:
+                timeout = settings.node_timeout
             try:
                 return await asyncio.wait_for(fn(state), timeout=timeout)
             except asyncio.TimeoutError:
@@ -81,6 +88,10 @@ def circuit_breaker(
                     itineraries, known = load_classic_itineraries(
                         state.get("city", ""), state.get("days", 1)
                     )
+                    # 天气是已获取的真实数据，降级时保留附加（不编造）
+                    for i, it in enumerate(itineraries):
+                        if i < len(state.get("weathers", [])):
+                            it.weather = state["weathers"][i]
                     payload.update(
                         {
                             "itineraries": itineraries,

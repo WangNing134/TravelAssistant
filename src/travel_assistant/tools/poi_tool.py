@@ -67,6 +67,37 @@ def _dedupe(pois: list[POI]) -> list[POI]:
     return result
 
 
+# 模糊去重半径：种子 geocode 与 place/text 对同一地点返回的坐标存在偏差（可达 ~0.5km）
+FUZZY_DEDUPE_KM = 1.0
+
+
+def _richer_poi(a: POI, b: POI) -> POI:
+    """两条重复记录取信息更全的那条（type/address 非空优先，place/text 侧通常更全）。"""
+    if not (a.type_code or a.address) and (b.type_code or b.address):
+        return b
+    return a
+
+
+def _dedupe_fuzzy(pois: list[POI]) -> list[POI]:
+    """精确 id 去重后，再做同名近距离去重。
+
+    种子 geocode 与 place/text 返回的坐标略有差异，精确 key 去不掉，
+    同名且相距 ≤FUZZY_DEDUPE_KM 视为同一 POI，避免同一景点占多个名额。
+    """
+    exact = _dedupe(pois)
+    result: list[POI] = []
+    for p in exact:
+        dup_index = next(
+            (i for i, q in enumerate(result) if q.name == p.name and haversine_km(p, q) <= FUZZY_DEDUPE_KM),
+            None,
+        )
+        if dup_index is None:
+            result.append(p)
+        else:
+            result[dup_index] = _richer_poi(result[dup_index], p)
+    return result
+
+
 def _interleave(preferred: list[POI], popular: list[POI], target: int) -> list[POI]:
     """偏好与热门交替合并：偏好优先但不垄断，避免同一景区子点位占满全部名额。"""
     merged: list[POI] = []
@@ -77,7 +108,7 @@ def _interleave(preferred: list[POI], popular: list[POI], target: int) -> list[P
             merged.append(popular[i])
         if len(merged) >= target * 2:
             break
-    return _cap_same_site(_dedupe(merged))[:target]
+    return _cap_same_site(_dedupe_fuzzy(merged))[:target]
 
 
 def _is_same_site(a: POI, b: POI) -> bool:
@@ -115,30 +146,29 @@ async def _seed_search(
 ) -> list[POI]:
     """城市名片逐个 geocode 定位（place/text 权重排序会淹没精确匹配）。
 
-    geocode 强制城市限定 + 归属/距离核验，坐标全部来自高德；串行节流规避 QPS 限制。
+    geocode 强制城市限定 + 归属/距离核验，坐标全部来自高德；
+    并发发起（QPS 由 AmapClient 全局限流器统一控制），结果保持入参顺序。
     """
     from travel_assistant.tools.geocode_tool import geocode_place_in_city
 
-    result: list[POI] = []
-    for i, name in enumerate(names):
-        if i:
-            await asyncio.sleep(0.25)  # 个人 Key QPS 节流
+    async def _one(name: str) -> POI | None:
         loc = await geocode_place_in_city(name, adcode, center=center, city=city)
-        if loc is not None:
-            result.append(
-                POI(
-                    name=name,
-                    adcode=adcode,
-                    lng=loc.lng,
-                    lat=loc.lat,
-                    poi_id="",
-                    address="",
-                    type_code="",
-                    duration=2.0,
-                    price=None,
-                )
-            )
-    return result
+        if loc is None:
+            return None
+        return POI(
+            name=name,
+            adcode=adcode,
+            lng=loc.lng,
+            lat=loc.lat,
+            poi_id="",
+            address="",
+            type_code="",
+            duration=2.0,
+            price=None,
+        )
+
+    located = await asyncio.gather(*(_one(n) for n in names))
+    return [p for p in located if p is not None]
 
 
 async def _text_search(adcode: str, keywords: str, limit: int) -> list[POI]:
@@ -196,7 +226,9 @@ async def search_attractions(
     results = dict(zip(tasks.keys(), await asyncio.gather(*tasks.values())))
 
     preferred = results.get("preferred", [])
-    popular = _dedupe(results.get("seeded", []) + results.get("keyworded", []) + results.get("generic", []))
+    popular = _dedupe_fuzzy(
+        results.get("seeded", []) + results.get("keyworded", []) + results.get("generic", [])
+    )
 
     if center is not None:
         before = len(preferred) + len(popular)
@@ -207,7 +239,7 @@ async def search_attractions(
     pois = (
         _interleave(preferred, popular, target)
         if preferred
-        else _cap_same_site(_dedupe(popular))[:target]
+        else _cap_same_site(_dedupe_fuzzy(popular))[:target]
     )
     logger.info(
         "poi_search_done",

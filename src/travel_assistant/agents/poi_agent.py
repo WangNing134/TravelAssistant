@@ -7,7 +7,7 @@ from travel_assistant.tools.poi_tool import search_attractions
 
 
 @trace_node("poi_agent")
-@circuit_breaker("poi_agent", {"pois": []})
+@circuit_breaker("poi_agent", {"pois": []}, timeout_attr="poi_node_timeout")
 async def poi_agent(state: dict) -> dict:
     adcode = state.get("adcode", "")
     days = state.get("days", 1)

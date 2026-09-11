@@ -1,4 +1,4 @@
-"""周边搜索：以核心 POI 经纬度为中心，就近检索酒店(010000)/餐饮(050000)。
+"""周边搜索：以核心 POI 经纬度为中心，就近检索酒店(100000)/餐饮(050000)。
 
 酒店按综合权重排序，餐饮按距离排序。
 """
@@ -11,7 +11,8 @@ from travel_assistant.tools.amap_client import get_amap_client
 
 logger = get_logger(__name__)
 
-HOTEL_TYPE = "010000"
+# 高德分类：100000=住宿服务（010000 是汽车服务，勿混淆）
+HOTEL_TYPE = "100000"
 RESTAURANT_TYPE = "050000"
 
 

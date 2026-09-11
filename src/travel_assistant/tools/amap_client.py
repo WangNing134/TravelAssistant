@@ -111,9 +111,18 @@ class AmapClient:
         request_params = {**params, "key": self._settings.amap_api_key}
         request_timeout = httpx.Timeout(timeout) if timeout else None
         try:
-            resp = await self._client.get(path, params=request_params, timeout=request_timeout)
+            # httpx 超时按 connect/read/write 分阶段计量，慢速响应可无限拖长总时长，
+            # 这里叠加墙钟硬上限（2× amap_timeout）：既拦住病态慢滴，又给慢响应留余地；
+            # 各节点超时预算（30s/45s）已按该上限覆盖最坏请求链
+            resp = await asyncio.wait_for(
+                self._client.get(path, params=request_params, timeout=request_timeout),
+                timeout=self._settings.amap_timeout * 2,
+            )
             resp.raise_for_status()
             data = resp.json()
+        except asyncio.TimeoutError:
+            logger.warning("amap_timeout_L1", path=path)
+            return {}
         except httpx.TimeoutException:
             logger.warning("amap_timeout_L1", path=path)
             return {}

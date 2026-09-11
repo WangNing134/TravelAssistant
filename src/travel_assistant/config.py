@@ -29,7 +29,11 @@ class Settings(BaseSettings):
     llm_timeout: float = 15.0
 
     # Agent 编排
-    node_timeout: float = 15.0
+    # 链式节点（extract=LLM+geocode、hotel=高德+LLM）最坏耗时 ≈ llm_timeout + amap_timeout，
+    # 默认节点超时须覆盖叠加场景
+    node_timeout: float = 30.0
+    # POI 多路检索共享 3 QPS 全局限流器且种子 geocode 链长，独立放宽
+    poi_node_timeout: float = 45.0
     aggregate_node_timeout: float = 45.0
     llm_arrange_max_attempts: int = 3
 

@@ -71,6 +71,35 @@ def test_junk_commercial_names_filtered():
     assert not _is_junk_name("天府广场")
 
 
+def test_dedupe_fuzzy_merges_same_name_nearby_keeps_richer():
+    """种子 geocode 与 place/text 对同一景点坐标有偏差：同名近距须合并，保留信息全的一条。"""
+    from travel_assistant.tools.poi_tool import _dedupe_fuzzy
+
+    seeded = POI(name="故宫博物院", lng=1.0040, lat=1.0)  # geocode 坐标（偏差 ~0.44km），信息空
+    texted = POI(
+        poi_id="B000A8UIN8",
+        name="故宫博物院",
+        lng=1.0,
+        lat=1.0,
+        type_code="110201|140100",
+        address="景山前街4号",
+    )
+    merged = _dedupe_fuzzy([seeded, texted])
+    assert len(merged) == 1
+    assert merged[0].poi_id == "B000A8UIN8"
+    assert merged[0].type_code == "110201|140100"
+
+
+def test_dedupe_fuzzy_keeps_same_name_far_apart():
+    """同名但相距超过 1km 属异地同名景点，不得误合并。"""
+    from travel_assistant.tools.poi_tool import _dedupe_fuzzy
+
+    a = POI(poi_id="1", name="人民公园", lng=1.0, lat=1.0)
+    b = POI(poi_id="2", name="人民公园", lng=1.05, lat=1.0)  # ~5.5km
+    merged = _dedupe_fuzzy([a, b])
+    assert len(merged) == 2
+
+
 @respx.mock
 async def test_geocode_place_rejects_same_name_in_other_city():
     # 同名异地：新疆也有“宽窄巷子”，城市限定 510100 必须拒绝

@@ -74,6 +74,10 @@ async def supervisor_aggregate(state: dict) -> dict:
     # ---- L3：任一节点熔断，或景点全空（无坐标编排）-> 经典路线库 ----
     if state.get("circuit") or not pois:
         itineraries, known = load_classic_itineraries(city, days)
+        # 天气是 weather_agent 已获取的真实数据，降级时保留附加（不编造）
+        for i, it in enumerate(itineraries):
+            if i < len(weathers):
+                it.weather = weathers[i]
         logger.warning("aggregate_classic_L3", city=city, known=known, circuit=bool(state.get("circuit")))
         return {
             "itineraries": itineraries,

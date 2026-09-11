@@ -23,8 +23,13 @@ def amap_fixture():
 @pytest.fixture(autouse=True)
 def _isolated_settings(monkeypatch, request):
     if request.node.get_closest_marker("live"):
-        # 标记 @pytest.mark.live 的用例使用真实 .env 配置访问外网
+        # 标记 @pytest.mark.live 的用例使用真实 .env 配置访问外网；
+        # 仍需重置单例：上一个 live 用例 aclose 后，复用会拿到已关闭的客户端
+        from travel_assistant.tools import amap_client
+
+        amap_client._singleton = None
         yield
+        amap_client._singleton = None
         return
 
     monkeypatch.setenv("AMAP_API_KEY", "test-amap-key")

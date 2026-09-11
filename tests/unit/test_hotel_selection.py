@@ -46,9 +46,10 @@ class TestGeometricMean:
 # ---------- around_tool 搜索参数 ----------
 
 class TestAroundToolParams:
-    def test_hotel_type_is_010000(self):
+    def test_hotel_type_is_100000(self):
+        # 高德分类 100000=住宿服务；010000 是汽车服务（租车/充电站），曾导致搜出租车行
         from travel_assistant.tools.around_tool import HOTEL_TYPE
-        assert HOTEL_TYPE == "010000"
+        assert HOTEL_TYPE == "100000"
 
     def test_hotel_default_radius_3000(self):
         import inspect
