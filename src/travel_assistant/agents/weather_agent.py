@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from travel_assistant.agents.common import trace_node
+from travel_assistant.agents.common import circuit_breaker, trace_node
 from travel_assistant.tools.weather_tool import get_daily_weather
 
 
 @trace_node("weather_agent")
+@circuit_breaker("weather_agent", {"weathers": []})
 async def weather_agent(state: dict) -> dict:
     adcode = state.get("adcode", "")
     days = state.get("days", 1)

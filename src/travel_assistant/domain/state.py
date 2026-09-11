@@ -46,6 +46,7 @@ class AgentState(TypedDict, total=False):
 
     # 容错
     fatal: bool
+    circuit: bool
     degraded_level: Annotated[int, max_level]
     fallback_message: str
 

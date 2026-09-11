@@ -1,21 +1,24 @@
 """HotelAgent（食宿专员）：必须依赖 POIAgent 结果。
 
 以核心 POI 经纬度为中心，并行调用高德周边搜索检索酒店与餐饮；
-POI 为空时直接短路（无坐标可用），由 P5 的 L3 经典路线兜底。
+POI 为空或上游熔断时直接短路（无坐标可用），由 L3 经典路线兜底。
 """
 
 from __future__ import annotations
 
 import asyncio
 
-from travel_assistant.agents.common import trace_node
+from travel_assistant.agents.common import circuit_breaker, trace_node
 from travel_assistant.observability.logging import get_logger
 from travel_assistant.tools.around_tool import search_hotels, search_restaurants
 
 logger = get_logger(__name__)
 
+_EMPTY = {"hotels": [], "restaurants": []}
+
 
 @trace_node("hotel_agent")
+@circuit_breaker("hotel_agent", _EMPTY)
 async def hotel_agent(state: dict) -> dict:
     pois = state.get("pois", [])
     if not pois:

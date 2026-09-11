@@ -1,13 +1,19 @@
 """Supervisor（行程总监）：意图提取 + 最终天级编排聚合。
 
-- 提取：LLM 意图 -> 高德 geocode 校验城市真实存在（防幻觉城市入图）；
-- 聚合：LLM 天级编排，>N 次不可信则丢弃 LLM 结果，走距离贪心（L2）。
+- 提取：LLM 意图 -> 高德 geocode 校验城市真实存在（防幻觉城市入图）；超时/失败走 L4；
+- 聚合：LLM 天级编排，>N 次不可信走贪心（L2）；熔断或无真实 POI 时走经典路线库（L3）。
 """
 
 from __future__ import annotations
 
-from travel_assistant.agents.common import itinerary_dates, record_run, trace_node
+from travel_assistant.agents.common import (
+    circuit_breaker,
+    itinerary_dates,
+    record_run,
+    trace_node,
+)
 from travel_assistant.domain.models import DegradedLevel, Itinerary, Weather
+from travel_assistant.fallback.classic import load_classic_itineraries
 from travel_assistant.fallback.greedy_planner import greedy_plan
 from travel_assistant.llm.arrangement import arrange_pois_by_llm
 from travel_assistant.llm.intents import extract_trip_intent
@@ -18,6 +24,7 @@ logger = get_logger(__name__)
 
 
 @trace_node("supervisor_extract")
+@circuit_breaker("supervisor_extract", {"fatal": True})
 async def supervisor_extract(state: dict) -> dict:
     query = state.get("query", "")
     draft = await extract_trip_intent(query)
@@ -42,6 +49,11 @@ async def supervisor_extract(state: dict) -> dict:
 
 
 @trace_node("supervisor_aggregate")
+@circuit_breaker(
+    "supervisor_aggregate",
+    {"itineraries": [], "aggregated": True},
+    aggregate=True,
+)
 async def supervisor_aggregate(state: dict) -> dict:
     # Barrier 就绪门：多入边会多次调度本节点，必须两路到齐且只真实编排一次
     if state.get("aggregated"):
@@ -59,6 +71,21 @@ async def supervisor_aggregate(state: dict) -> dict:
     hotels = state.get("hotels", [])
     restaurants = state.get("restaurants", [])
 
+    # ---- L3：任一节点熔断，或景点全空（无坐标编排）-> 经典路线库 ----
+    if state.get("circuit") or not pois:
+        itineraries, known = load_classic_itineraries(city, days)
+        logger.warning("aggregate_classic_L3", city=city, known=known, circuit=bool(state.get("circuit")))
+        return {
+            "itineraries": itineraries,
+            "aggregated": True,
+            "degraded_level": DegradedLevel.L3_CIRCUIT,
+            "warnings": [
+                "已切换本地经典路线库（真实核验数据）"
+                if known
+                else "当前城市暂无经典路线库，使用通用模板（核心商圈自由探索）"
+            ],
+        }
+
     warnings: list[str] = []
     degraded = DegradedLevel.NONE
 
@@ -69,20 +96,13 @@ async def supervisor_aggregate(state: dict) -> dict:
     if not hotels:
         degraded = max(degraded, DegradedLevel.L1_API)
         warnings.append("食宿检索无结果")
-    if not pois:
-        degraded = max(degraded, DegradedLevel.L1_API)
-        warnings.append("景点检索无结果")
 
     # L2：先尝试 LLM 编排，多次失败再贪心兜底
-    groups = None
-    if pois:
-        groups = await arrange_pois_by_llm(city, days, preferences, pois)
-        if groups is None:
-            groups = greedy_plan(center, pois, days)
-            degraded = max(degraded, DegradedLevel.L2_FILTER)
-            warnings.append("LLM 路线编排多次失败，已切换距离贪心算法")
-    else:
-        groups = [[] for _ in range(days)]
+    groups = await arrange_pois_by_llm(city, days, preferences, pois)
+    if groups is None:
+        groups = greedy_plan(center, pois, days)
+        degraded = max(degraded, DegradedLevel.L2_FILTER)
+        warnings.append("LLM 路线编排多次失败，已切换距离贪心算法")
 
     dates = [w.date for w in weathers] if weathers else itinerary_dates(days)
     if len(dates) < days:
@@ -95,7 +115,6 @@ async def supervisor_aggregate(state: dict) -> dict:
             Itinerary(
                 date=d,
                 weather=weathers[i] if i < len(weathers) else Weather.unavailable(d),
-                # 同一酒店作为全程住宿基线（就近核心景点）；P7 可按天细化
                 hotel=hotels[0] if hotels else None,
                 pois=groups[i] if i < len(groups) else [],
                 restaurants=restaurants if i == 0 else [],

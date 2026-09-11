@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from travel_assistant.agents.common import trace_node
+from travel_assistant.agents.common import circuit_breaker, trace_node
 from travel_assistant.tools.poi_tool import search_attractions
 
 
 @trace_node("poi_agent")
+@circuit_breaker("poi_agent", {"pois": []})
 async def poi_agent(state: dict) -> dict:
     adcode = state.get("adcode", "")
     days = state.get("days", 1)
