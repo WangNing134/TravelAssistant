@@ -31,6 +31,30 @@ ARRANGE_USER_TEMPLATE = (
 )
 
 
+# ===== P5：天气感知 POI 室内外分类 =====
+
+POI_FILTER_SYSTEM = (
+    "你是景点室内外分类器。给你一份景点名称清单，请判断每个景点是室内(indoor=true)还是室外(indoor=false)。\n"
+    "室内：博物馆、美术馆、科技馆、纪念馆、图书馆、购物中心、海洋馆、水族馆、室内剧场、展览馆。\n"
+    "室外：公园、广场、山、湖、古镇、古街、寺庙（室外为主）、风景区、步行街、自然景观、植物园。\n"
+    '只输出 JSON：{"classifications": [{"name": "景点名", "indoor": true}]}'
+)
+
+POI_FILTER_USER = "景点清单：\n{poi_names}"
+
+
+# ===== P5：酒店 LLM 精选 =====
+
+HOTEL_SELECT_SYSTEM = (
+    "你是酒店选择顾问。给你 5 个候选酒店（来自地图 API，含名称、地址、距离核心景点距离）和用户的旅行偏好，"
+    "请选出最符合用户预算和风格的那一家。\n"
+    "选择依据：'穷游'/'经济'->距离近实惠；'豪华'/'高端'->品牌酒店；'带老人'/'亲子'->交通便利安静。\n"
+    '只输出 JSON：{"selected_hotel": "酒店名", "reason": "简要理由"}'
+)
+
+HOTEL_SELECT_USER = "用户偏好：{preferences}\n候选酒店：\n{hotel_lines}"
+
+
 # ===== 规则兜底：城市词典（LLM 不可用时识别城市）=====
 
 CITY_VOCAB = [

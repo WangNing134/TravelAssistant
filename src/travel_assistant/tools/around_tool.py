@@ -1,6 +1,6 @@
-"""周边搜索：以核心 POI 经纬度为中心，就近检索酒店(100000)/餐饮(050000)。
+"""周边搜索：以核心 POI 经纬度为中心，就近检索酒店(010000)/餐饮(050000)。
 
-distance 直接采用高德响应字段（米），结果按距离升序。
+酒店按综合权重排序，餐饮按距离排序。
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from travel_assistant.tools.amap_client import get_amap_client
 
 logger = get_logger(__name__)
 
-HOTEL_TYPE = "100000"
+HOTEL_TYPE = "010000"
 RESTAURANT_TYPE = "050000"
 
 
@@ -46,6 +46,7 @@ async def _around(
     kind: str,
     limit: int,
     radius: int,
+    sortrule: str = "distance",
 ) -> list[Hotel]:
     data = await get_amap_client().get_json(
         "/place/around",
@@ -53,7 +54,7 @@ async def _around(
             "location": f"{lng},{lat}",
             "types": types,
             "radius": str(radius),
-            "sortrule": "distance",
+            "sortrule": sortrule,
             "offset": str(limit),
             "page": "1",
             "extensions": "base",
@@ -67,9 +68,9 @@ async def _around(
 
 
 async def search_hotels(
-    lng: float, lat: float, limit: int = 5, radius: int = 5000
+    lng: float, lat: float, limit: int = 5, radius: int = 3000
 ) -> list[Hotel]:
-    hotels = await _around(lng, lat, HOTEL_TYPE, "hotel", limit, radius)
+    hotels = await _around(lng, lat, HOTEL_TYPE, "hotel", limit, radius, sortrule="weight")
     logger.info("hotel_search_done", count=len(hotels))
     return hotels
 

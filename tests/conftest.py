@@ -21,7 +21,12 @@ def amap_fixture():
 
 
 @pytest.fixture(autouse=True)
-def _isolated_settings(monkeypatch):
+def _isolated_settings(monkeypatch, request):
+    if request.node.get_closest_marker("live"):
+        # 标记 @pytest.mark.live 的用例使用真实 .env 配置访问外网
+        yield
+        return
+
     monkeypatch.setenv("AMAP_API_KEY", "test-amap-key")
     monkeypatch.setenv("LLM_API_KEY", "test-llm-key")
     monkeypatch.setenv("LLM_BASE_URL", "https://llm.example.test")

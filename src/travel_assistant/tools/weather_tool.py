@@ -13,6 +13,14 @@ from travel_assistant.tools.amap_client import get_amap_client
 
 logger = get_logger(__name__)
 
+# 坏天气关键词：命中任一即判定为不宜户外游览
+BAD_WEATHER_KEYWORDS = ("雨", "雪", "暴", "雷", "冰雹", "沙尘", "雾", "霾")
+
+
+def is_bad_weather(condition: str) -> bool:
+    """判断天气状况是否不适合户外景点游览。"""
+    return any(kw in condition for kw in BAD_WEATHER_KEYWORDS)
+
 
 async def get_daily_weather(adcode: str, days: int) -> list[Weather]:
     """返回长度恰为 days 的逐日天气；API 失败或不足天数用 unavailable 补齐。"""

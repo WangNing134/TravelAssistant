@@ -36,3 +36,6 @@ travel_assistant = ["fallback/*.json"]
 asyncio_mode = "auto"
 pythonpath = ["src"]
 testpaths = ["tests"]
+markers = [
+    "live: 真实调用高德/LLM 外网接口（需 .env 配置真实 Key）",
+]

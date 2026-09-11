@@ -11,6 +11,7 @@ from travel_assistant.graph.builder import (
     NODE_GLOBAL_FALLBACK,
     NODE_HOTEL,
     NODE_POI,
+    NODE_POI_FILTER,
     NODE_WEATHER,
     build_graph,
 )
@@ -28,13 +29,20 @@ def test_graph_topology_is_asymmetric_dag():
     spec = next(iter(branches.values()))
     assert set(spec.ends) == {NODE_WEATHER, NODE_POI, NODE_GLOBAL_FALLBACK}
 
-    # Chain：Hotel 的唯一上游是 POI（串行依赖，weather 不接 hotel）
-    assert (NODE_POI, NODE_HOTEL) in edges
+    # Barrier：poi_filter 等待 weather + poi 双路就绪
+    assert (NODE_WEATHER, NODE_POI_FILTER) in edges
+    assert (NODE_POI, NODE_POI_FILTER) in edges
+
+    # Chain：Filter -> Hotel（poi_filter 完成后才搜酒店）
+    assert (NODE_POI_FILTER, NODE_HOTEL) in edges
+
+    # Weather 不直连 Hotel（天气先经过 filter）
     assert not any(src == NODE_WEATHER and dst == NODE_HOTEL for src, dst in edges)
 
-    # Fan-in barrier：aggregate 上游恰为 weather 与 hotel 两条边
+    # Hotel -> Aggregate（aggregate 上游只有 Hotel 一条边）
+    assert (NODE_HOTEL, NODE_AGGREGATE) in edges
     aggregate_sources = {src for src, dst in edges if dst == NODE_AGGREGATE}
-    assert aggregate_sources == {NODE_WEATHER, NODE_HOTEL}
+    assert aggregate_sources == {NODE_HOTEL}
 
     # 终止接线
     assert (NODE_AGGREGATE, END) in edges

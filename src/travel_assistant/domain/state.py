@@ -48,6 +48,8 @@ class AgentState(TypedDict, total=False):
     itineraries: list[Itinerary]
     # barrier 守卫：聚合节点被多入边多次调度时，保证真实编排只执行一次
     aggregated: bool
+    # barrier 守卫：poi_filter 节点防重入
+    poi_filtered: bool
 
     # 容错
     fatal: bool

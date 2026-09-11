@@ -81,3 +81,63 @@ def parse_arrangement(data: dict | None, days: int, allowed_names: set[str]) -> 
     if set(used) != allowed_names:
         return None  # 遗漏真实景点
     return draft
+
+
+# ===== P5：POI 室内外分类解析 =====
+
+
+class POIClassificationDraft(BaseModel):
+    name: str
+    indoor: bool
+
+
+class POIFilterDraft(BaseModel):
+    classifications: list[POIClassificationDraft]
+
+    @field_validator("classifications", mode="before")
+    @classmethod
+    def _coerce(cls, v):
+        if isinstance(v, list):
+            return v
+        return []
+
+
+def parse_poi_filter(data: dict | None, allowed_names: set[str]) -> dict[str, bool] | None:
+    """校验分类结果：名称必须来自真实清单。返回 {name: indoor} 映射。"""
+    if not isinstance(data, dict):
+        return None
+    try:
+        draft = POIFilterDraft.model_validate(data)
+    except Exception:
+        return None
+
+    result: dict[str, bool] = {}
+    for c in draft.classifications:
+        name = c.name.strip()
+        if name in allowed_names:
+            result[name] = c.indoor
+    if not result:
+        return None
+    return result
+
+
+# ===== P5：酒店 LLM 精选解析 =====
+
+
+class HotelSelectDraft(BaseModel):
+    selected_hotel: str
+    reason: str = ""
+
+
+def parse_hotel_select(data: dict | None, allowed_names: set[str]) -> str | None:
+    """校验酒店选择：名称必须在候选清单中。"""
+    if not isinstance(data, dict):
+        return None
+    try:
+        draft = HotelSelectDraft.model_validate(data)
+    except Exception:
+        return None
+    name = draft.selected_hotel.strip()
+    if name in allowed_names:
+        return name
+    return None

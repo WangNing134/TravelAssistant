@@ -11,8 +11,8 @@ from travel_assistant.tools.amap_client import get_amap_client
 
 logger = get_logger(__name__)
 
-# 风景名胜一级类型码
-ATTRACTIONS_TYPE = "110000"
+# 检索类型：风景名胜(110000) + 博物馆(140200)
+ATTRACTIONS_TYPE = "110000|140200"
 
 # 城市热门景点检索词（空关键字排序不等于热度，且地级市 adcode 含下辖县，需精准词）
 POPULAR_KEYWORDS = "风景名胜区|古镇|古街|博物馆|纪念馆|寺"
@@ -182,20 +182,21 @@ async def search_attractions(
 
     keyword_str = "|".join(k.strip() for k in preferences if k.strip())
 
-    preferred: list[POI] = []
-    if keyword_str:
-        preferred = await _text_search(adcode, keyword_str, target)
-
-    # 路 1：已核验城市名片种子（种子仅为检索词，坐标全部来自高德 geocode）
     seed_names = classic_seed_names(city) if city else []
-    seeded = (
-        await _seed_search(seed_names, adcode, center, city) if seed_names and center else []
-    )
 
-    # 路 2/3：精准热度词 + 泛热门（城市名片常不含精准词，如“宽窄巷子”）
-    keyworded = await _text_search(adcode, POPULAR_KEYWORDS, target)
-    generic = await _text_search(adcode, "", target)
-    popular = _dedupe(seeded + keyworded + generic)
+    # 四路检索并发发起（QPS 由 AmapClient 全局限流器自动控制，无需各自节流）
+    tasks: dict[str, asyncio.Future] = {}
+    if keyword_str:
+        tasks["preferred"] = asyncio.ensure_future(_text_search(adcode, keyword_str, target))
+    if seed_names and center:
+        tasks["seeded"] = asyncio.ensure_future(_seed_search(seed_names, adcode, center, city))
+    tasks["keyworded"] = asyncio.ensure_future(_text_search(adcode, POPULAR_KEYWORDS, target))
+    tasks["generic"] = asyncio.ensure_future(_text_search(adcode, "", target))
+
+    results = dict(zip(tasks.keys(), await asyncio.gather(*tasks.values())))
+
+    preferred = results.get("preferred", [])
+    popular = _dedupe(results.get("seeded", []) + results.get("keyworded", []) + results.get("generic", []))
 
     if center is not None:
         before = len(preferred) + len(popular)
