@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>旅途 TravelAssistant</title>
+<style>
+  :root {
+    --bg: #f0f2f5;
+    --card: #ffffff;
+    --primary: #4f46e5;
+    --primary-light: #e0e7ff;
+    --text: #1f2937;
+    --text-muted: #6b7280;
+    --border: #e5e7eb;
+    --green: #10b981;
+    --amber: #f59e0b;
+    --red: #ef4444;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: "PingFang SC","Microsoft YaHei",system-ui,sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; display: flex; flex-direction: column; }
+  header { background: linear-gradient(135deg,#4f46e5,#7c3aed); color: #fff; padding: 1.2rem 2rem; box-shadow: 0 1px 8px rgba(0,0,0,.1); }
+  header h1 { font-size: 1.5rem; font-weight: 700; }
+  header p { font-size: .85rem; opacity: .85; margin-top: .15rem; }
+  main { flex: 1; max-width: 800px; width: 100%; margin: 0 auto; padding: 1.5rem 1rem; display: flex; flex-direction: column; gap: 1rem; }
+  #chat { flex: 1; display: flex; flex-direction: column; gap: .75rem; min-height: 200px; }
+  .msg { max-width: 85%; padding: .7rem 1rem; border-radius: .75rem; line-height: 1.6; font-size: .9rem; word-break: break-word; }
+  .msg.user { align-self: flex-end; background: var(--primary); color: #fff; border-bottom-right-radius: .25rem; }
+  .msg.bot { align-self: flex-start; background: var(--card); border: 1px solid var(--border); border-bottom-left-radius: .25rem; }
+  .msg.progress { align-self: flex-start; background: var(--primary-light); color: var(--primary); font-size: .85rem; border: 1px solid transparent; }
+  .msg.progress .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--primary); margin-right: 6px; animation: pulse 1s ease-in-out infinite; }
+  @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: .3; } }
+  .plan-card { background: var(--card); border-radius: 1rem; padding: 1.5rem; box-shadow: 0 2px 12px rgba(0,0,0,.06); }
+  .plan-card h2 { font-size: 1.1rem; margin-bottom: .15rem; }
+  .plan-card .meta-row { display: flex; gap: .5rem; flex-wrap: wrap; margin: .5rem 0 1rem; }
+  .badge { font-size: .75rem; padding: .15rem .6rem; border-radius: 1rem; font-weight: 600; }
+  .badge.green { background: #d1fae5; color: #065f46; }
+  .badge.amber { background: #fef3c7; color: #92400e; }
+  .badge.red { background: #fee2e2; color: #991b1b; }
+  .badge.gray { background: #f3f4f6; color: var(--text-muted); }
+  .day-section { border-top: 1px solid var(--border); padding-top: 1rem; margin-top: 1rem; }
+  .day-section:first-child { border-top: none; margin-top: 0; padding-top: 0; }
+  .day-header { display: flex; align-items: center; gap: .5rem; margin-bottom: .5rem; }
+  .day-header .day-num { background: var(--primary); color: #fff; border-radius: 50%; width: 28px; height: 28px; display: flex; align-items: center; justify-content: center; font-size: .8rem; font-weight: 700; flex-shrink: 0; }
+  .day-header .date { font-weight: 600; font-size: .9rem; }
+  .day-header .weather { font-size: .8rem; color: var(--text-muted); }
+  .poi-list { list-style: none; padding-left: 2.2rem; }
+  .poi-list li { padding: .35rem 0; font-size: .88rem; }
+  .poi-list .poi-name { font-weight: 600; }
+  .poi-list .poi-meta { color: var(--text-muted); font-size: .78rem; }
+  .hotel-info { padding-left: 2.2rem; margin-top: .4rem; font-size: .82rem; color: var(--text-muted); }
+  .warnings { margin-top: .8rem; padding: .5rem .75rem; background: #fff7ed; border-radius: .5rem; font-size: .8rem; color: #9a3412; }
+  .input-area { display: flex; gap: .5rem; padding: 1rem; background: var(--card); border-radius: 1rem; box-shadow: 0 2px 12px rgba(0,0,0,.06); }
+  .input-area input { flex: 1; border: 1px solid var(--border); border-radius: .5rem; padding: .65rem .85rem; font-size: .9rem; outline: none; transition: border-color .2s; }
+  .input-area input:focus { border-color: var(--primary); }
+  .input-area button { background: var(--primary); color: #fff; border: none; border-radius: .5rem; padding: .65rem 1.5rem; font-size: .9rem; font-weight: 600; cursor: pointer; transition: opacity .2s; }
+  .input-area button:hover { opacity: .85; }
+  .input-area button:disabled { opacity: .5; cursor: not-allowed; }
+  .examples { display: flex; gap: .4rem; flex-wrap: wrap; }
+  .examples button { background: var(--primary-light); color: var(--primary); border: 1px solid transparent; border-radius: 1rem; padding: .25rem .75rem; font-size: .8rem; cursor: pointer; transition: all .2s; }
+  .examples button:hover { border-color: var(--primary); }
+</style>
+</head>
+<body>
+<header>
+  <h1>旅途 TravelAssistant</h1>
+  <p>多智能体旅游规划 · 零地点幻觉 · 4 级降级保障</p>
+</header>
+<main>
+  <div id="chat"></div>
+  <div class="examples">
+    <button onclick="fillExample(this)">去成都玩2天，看熊猫</button>
+    <button onclick="fillExample(this)">去杭州玩2天，游西湖</button>
+    <button onclick="fillExample(this)">去西安玩2天看兵马俑</button>
+    <button onclick="fillExample(this)">去北京玩3天</button>
+  </div>
+  <div class="input-area">
+    <input id="query" type="text" placeholder="输入你的旅游需求，如：去重庆玩2天，吃火锅看夜景" onkeydown="if(event.key==='Enter')send()" />
+    <button id="sendBtn" onclick="send()">发送</button>
+  </div>
+</main>
+
+<script>
+const chat = document.getElementById('chat');
+const input = document.getElementById('query');
+const sendBtn = document.getElementById('sendBtn');
+
+function fillExample(btn) { input.value = btn.textContent; input.focus(); }
+
+function addMsg(cls, text) {
+  const div = document.createElement('div');
+  div.className = 'msg ' + cls;
+  div.innerHTML = text;
+  chat.appendChild(div);
+  chat.scrollTop = chat.scrollHeight;
+  return div;
+}
+
+function levelBadge(level) {
+  const map = [
+    ['green','L0 全链路真实'],
+    ['amber','L1 部分降级'],
+    ['amber','L2 贪心兜底'],
+    ['amber','L3 经典路线'],
+    ['red','L4 全局兜底'],
+  ];
+  const [color, text] = map[level] || ['gray','未知'];
+  return '<span class="badge ' + color + '">' + text + '</span>';
+}
+
+function renderPlan(plan) {
+  const card = document.createElement('div');
+  card.className = 'plan-card';
+  let html = '<h2>' + (plan.city || '未知城市') + ' · ' + plan.days + '天行程</h2>';
+  html += '<div class="meta-row">';
+  html += levelBadge(plan.meta.degraded_level);
+  html += '<span class="badge gray">来源: ' + plan.meta.source + '</span>';
+  if (plan.meta.trace_id) html += '<span class="badge gray">trace: ' + plan.meta.trace_id.slice(0,8) + '</span>';
+  html += '</div>';
+  if (plan.message) html += '<p style="color:#6b7280;margin-bottom:.8rem;font-size:.85rem">' + plan.message + '</p>';
+
+  plan.itineraries.forEach((day, i) => {
+    html += '<div class="day-section"><div class="day-header">';
+    html += '<div class="day-num">' + (i+1) + '</div>';
+    html += '<span class="date">' + day.date + '</span>';
+    if (day.weather) html += '<span class="weather">| ' + day.weather.condition + ' ' + day.weather.temperature + '</span>';
+    html += '</div>';
+    if (day.pois && day.pois.length) {
+      html += '<ul class="poi-list">';
+      day.pois.forEach(p => {
+        html += '<li><span class="poi-name">' + p.name + '</span>';
+        if (p.duration) html += ' <span class="poi-meta">建议' + p.duration + 'h</span>';
+        if (p.price != null) html += ' <span class="poi-meta">门票¥' + p.price + '</span>';
+        html += '</li>';
+      });
+      html += '</ul>';
+    }
+    if (day.hotel) html += '<div class="hotel-info">住宿: ' + day.hotel.name + '</div>';
+    if (day.restaurants && day.restaurants.length) {
+      const rnames = day.restaurants.map(r => r.name).join('、');
+      html += '<div class="hotel-info">餐饮: ' + rnames + '</div>';
+    }
+    html += '</div>';
+  });
+
+  if (plan.meta.warnings && plan.meta.warnings.length) {
+    html += '<div class="warnings">';
+    plan.meta.warnings.forEach(w => { html += '<div>⚠ ' + w + '</div>'; });
+    html += '</div>';
+  }
+  card.innerHTML = html;
+  chat.appendChild(card);
+  chat.scrollTop = chat.scrollHeight;
+}
+
+async function send() {
+  const q = input.value.trim();
+  if (!q || sendBtn.disabled) return;
+  addMsg('user', q);
+  input.value = '';
+  sendBtn.disabled = true;
+  sendBtn.textContent = '规划中…';
+
+  const progressDiv = addMsg('progress', '<span class="dot"></span>正在连接规划引擎…');
+
+  try {
+    const resp = await fetch('/api/v1/trips/plan/stream', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ query: q })
+    });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+
+    const reader = resp.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let hasResult = false;
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop();  // 保留不完整的行
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        const data = JSON.parse(line.slice(6));
+        if (data.type === 'progress') {
+          progressDiv.innerHTML = '<span class="dot"></span>' + data.label + '：' + data.message;
+        } else if (data.type === 'result') {
+          progressDiv.remove();
+          renderPlan(data.plan);
+          hasResult = true;
+        } else if (data.type === 'done') {
+          // 流结束
+        }
+      }
+    }
+    if (!hasResult) {
+      progressDiv.remove();
+      addMsg('bot', '未收到完整结果，请重试。');
+    }
+  } catch (e) {
+    progressDiv.remove();
+    addMsg('bot', '请求失败：' + e.message + '（请确认后端服务已启动）');
+  } finally {
+    sendBtn.disabled = false;
+    sendBtn.textContent = '发送';
+    input.focus();
+  }
+}
+</script>
+</body>
+</html>
